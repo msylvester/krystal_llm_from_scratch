@@ -1,0 +1,12 @@
+# Core dependencies for LLM from Scratch project
+torch>=2.0.0
+tiktoken>=0.5.0
+numpy>=1.21.0
+pandas>=1.5.0
+
+# Optional dependencies for visualization and additional features
+matplotlib>=3.5.0
+tqdm>=4.64.0
+
+# For loading pretrained weights (optional)
+tensorflow>=2.10.0
