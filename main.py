@@ -21,12 +21,39 @@ from classification import SpamDataset, train_classifier_simple, classify_review
 GPT_CONFIGS = {
     "gpt2-small": {
         "vocab_size": 50257,
-        "context_length": 256,  # Reduced for educational purposes
+        "context_length": 1024,  # Full context length for pretrained models
         "emb_dim": 768,
         "n_heads": 12,
         "n_layers": 12,
-        "drop_rate": 0.1,
-        "qkv_bias": False
+        "drop_rate": 0.0,  # No dropout for inference
+        "qkv_bias": True   # Required for pretrained weights
+    },
+    "gpt2-medium": {
+        "vocab_size": 50257,
+        "context_length": 1024,
+        "emb_dim": 1024,
+        "n_heads": 16,
+        "n_layers": 24,
+        "drop_rate": 0.0,
+        "qkv_bias": True
+    },
+    "gpt2-large": {
+        "vocab_size": 50257,
+        "context_length": 1024,
+        "emb_dim": 1280,
+        "n_heads": 20,
+        "n_layers": 36,
+        "drop_rate": 0.0,
+        "qkv_bias": True
+    },
+    "gpt2-xl": {
+        "vocab_size": 50257,
+        "context_length": 1024,
+        "emb_dim": 1600,
+        "n_heads": 25,
+        "n_layers": 48,
+        "drop_rate": 0.0,
+        "qkv_bias": True
     },
     "gpt2-mini": {  # Smaller version for quick testing
         "vocab_size": 50257,
@@ -38,6 +65,65 @@ GPT_CONFIGS = {
         "qkv_bias": False
     }
 }
+
+# Weight file mapping
+WEIGHT_FILES = {
+    "gpt2-small": "gpt2-small-124M.pth",
+    "gpt2-medium": "gpt2-medium-355M.pth", 
+    "gpt2-large": "gpt2-large-774M.pth",
+    "gpt2-xl": "gpt2-xl-1558M.pth"
+}
+
+
+def download_weights(model_name):
+    """Download pretrained weights for the specified model"""
+    if model_name not in WEIGHT_FILES:
+        print(f"No pretrained weights available for {model_name}")
+        return None
+        
+    file_name = WEIGHT_FILES[model_name]
+    url = f"https://huggingface.co/rasbt/gpt2-from-scratch-pytorch/resolve/main/{file_name}"
+    
+    if not os.path.exists(file_name):
+        print(f"Downloading pretrained weights: {file_name}")
+        try:
+            urllib.request.urlretrieve(url, file_name)
+            print(f"Downloaded to {file_name}")
+        except Exception as e:
+            print(f"Error downloading weights: {e}")
+            return None
+    else:
+        print(f"Using existing weights: {file_name}")
+    
+    return file_name
+
+
+def load_pretrained_model(model_name="gpt2-small"):
+    """Load a GPT model with pretrained weights"""
+    if model_name not in GPT_CONFIGS:
+        print(f"Unknown model: {model_name}")
+        return None, None
+        
+    config = GPT_CONFIGS[model_name]
+    
+    # Download weights if needed
+    weight_file = download_weights(model_name)
+    if weight_file is None:
+        print("Could not download weights, using untrained model")
+        model = GPTModel(config)
+        return model, config
+    
+    # Create model and load pretrained weights
+    model = GPTModel(config)
+    try:
+        model.load_state_dict(torch.load(weight_file, weights_only=True))
+        model.eval()
+        print(f"Loaded pretrained {model_name} model")
+    except Exception as e:
+        print(f"Error loading weights: {e}")
+        print("Using untrained model")
+    
+    return model, config
 
 
 def download_text_data():
@@ -107,30 +193,54 @@ def demo_model_creation():
     print(f"Output shape: {output.shape}")
 
 
-def demo_text_generation():
+def demo_text_generation(use_pretrained=False, model_name="gpt2-small"):
     """Demonstrate text generation"""
     print("\n=== Text Generation Demo ===")
     
-    config = GPT_CONFIGS["gpt2-mini"]
-    model = GPTModel(config)
-    model.eval()
+    if use_pretrained:
+        model, config = load_pretrained_model(model_name)
+        if model is None:
+            return
+    else:
+        config = GPT_CONFIGS["gpt2-mini"]
+        model = GPTModel(config)
+        model.eval()
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
     
     tokenizer = tiktoken.get_encoding("gpt2")
     
-    start_text = "The future of AI is"
+    start_text = "Every effort moves"
     print(f"Starting text: '{start_text}'")
+    print(f"Using model: {model_name if use_pretrained else 'gpt2-mini (untrained)'}")
     
-    # Generate text (will be random since model is untrained)
-    token_ids = generate_text_simple(
-        model=model,
-        idx=text_to_token_ids(start_text, tokenizer),
-        max_new_tokens=10,
-        context_size=config["context_length"]
-    )
+    # Generate text
+    torch.manual_seed(123)
+    if use_pretrained and hasattr(model, 'generate'):
+        # Use advanced generation if available
+        token_ids = generate(
+            model=model,
+            idx=text_to_token_ids(start_text, tokenizer).to(device),
+            max_new_tokens=30,
+            context_size=config["context_length"],
+            top_k=1,
+            temperature=1.0
+        )
+    else:
+        # Use simple generation
+        token_ids = generate_text_simple(
+            model=model,
+            idx=text_to_token_ids(start_text, tokenizer),
+            max_new_tokens=30,
+            context_size=config["context_length"]
+        )
     
     generated_text = token_ids_to_text(token_ids, tokenizer)
     print(f"Generated text: '{generated_text}'")
-    print("Note: Output is random since model is untrained")
+    
+    if not use_pretrained:
+        print("Note: Output is random since model is untrained")
 
 
 def demo_training():
@@ -228,21 +338,52 @@ def demo_classification_setup():
     print(f"Trainable ratio: {trainable_params/total_params:.3f}")
 
 
-def generate_response(input_text):
+def generate_response(input_text, use_pretrained=True, model_name="gpt2-small", max_tokens=20):
     """Generate a response for the given input text"""
-    config = GPT_CONFIGS["gpt2-mini"]
-    model = GPTModel(config)
-    model.eval()
+    if use_pretrained:
+        model, config = load_pretrained_model(model_name)
+        if model is None:
+            print("Falling back to untrained model")
+            config = GPT_CONFIGS["gpt2-mini"]
+            model = GPTModel(config)
+            model.eval()
+            use_pretrained = False
+    else:
+        config = GPT_CONFIGS["gpt2-mini"]
+        model = GPTModel(config)
+        model.eval()
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
     
     tokenizer = tiktoken.get_encoding("gpt2")
     
     # Generate text
-    token_ids = generate_text_simple(
-        model=model,
-        idx=text_to_token_ids(input_text, tokenizer),
-        max_new_tokens=20,
-        context_size=config["context_length"]
-    )
+    if use_pretrained:
+        try:
+            token_ids = generate(
+                model=model,
+                idx=text_to_token_ids(input_text, tokenizer).to(device),
+                max_new_tokens=max_tokens,
+                context_size=config["context_length"],
+                top_k=50,
+                temperature=0.8
+            )
+        except:
+            # Fallback to simple generation
+            token_ids = generate_text_simple(
+                model=model,
+                idx=text_to_token_ids(input_text, tokenizer),
+                max_new_tokens=max_tokens,
+                context_size=config["context_length"]
+            )
+    else:
+        token_ids = generate_text_simple(
+            model=model,
+            idx=text_to_token_ids(input_text, tokenizer),
+            max_new_tokens=max_tokens,
+            context_size=config["context_length"]
+        )
     
     generated_text = token_ids_to_text(token_ids, tokenizer)
     return generated_text
@@ -252,14 +393,26 @@ def main():
     parser = argparse.ArgumentParser(description="LLM from Scratch Demo")
     parser.add_argument("input_text", nargs="?", help="Text to generate response for")
     parser.add_argument("--demo", type=str, choices=[
-        "tokenization", "model", "generation", "training", "classification", "all"
+        "tokenization", "model", "generation", "pretrained", "training", "classification", "all"
     ], help="Which demo to run")
+    parser.add_argument("--model", type=str, default="gpt2-small", 
+                       choices=["gpt2-small", "gpt2-medium", "gpt2-large", "gpt2-xl"],
+                       help="Which pretrained model to use")
+    parser.add_argument("--max-tokens", type=int, default=50, 
+                       help="Maximum tokens to generate")
+    parser.add_argument("--no-pretrained", action="store_true", 
+                       help="Use untrained model instead of pretrained weights")
     
     args = parser.parse_args()
     
     # If input text is provided, generate response
     if args.input_text:
-        response = generate_response(args.input_text)
+        response = generate_response(
+            args.input_text, 
+            use_pretrained=not args.no_pretrained,
+            model_name=args.model,
+            max_tokens=args.max_tokens
+        )
         print(response)
         return
     
@@ -277,7 +430,10 @@ def main():
         demo_model_creation()
     
     if demo_to_run in ["generation", "all"]:
-        demo_text_generation()
+        demo_text_generation(use_pretrained=False)
+    
+    if demo_to_run in ["pretrained", "all"]:
+        demo_text_generation(use_pretrained=True, model_name=args.model)
     
     if demo_to_run in ["training", "all"]:
         demo_training()
@@ -290,11 +446,15 @@ def main():
     print("\nTo run specific demos:")
     print("  python main.py --demo tokenization")
     print("  python main.py --demo model")
-    print("  python main.py --demo generation")
+    print("  python main.py --demo generation      # Untrained model")
+    print("  python main.py --demo pretrained     # Pretrained model")
     print("  python main.py --demo training")
     print("  python main.py --demo classification")
-    print("\nTo generate text:")
+    print("\nTo generate text with pretrained model:")
     print('  python main.py "your input text here"')
+    print('  python main.py "your input text here" --model gpt2-medium --max-tokens 100')
+    print("\nTo generate text with untrained model:")
+    print('  python main.py "your input text here" --no-pretrained')
 
 
 if __name__ == "__main__":

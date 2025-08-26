@@ -2,6 +2,12 @@
 
 This project is based on the "Build a Large Language Model from Scratch" book by Sebastian Raschka. The notebooks have been converted into a modular Python project that can be run with `python main.py`. 📚
 
+## Important notes 
+![Quality Characteristics](images/quality_characteristics.png)
+
+*Comparison of different model characteristics and quality metrics*
+
+
 ## 📁 Project Structure
 
 ```
@@ -48,9 +54,6 @@ This launches an interactive web interface where you can:
 
 *Example output from GPT-2 Large model showing improved quality*
 
-![Quality Characteristics](images/quality_characteristics.png)
-
-*Comparison of different model characteristics and quality metrics*
 
 ### 💻 Run Command Line Demos:
 
